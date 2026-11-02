@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../models/models.dart';
+import '../providers/app_provider.dart';
 import '../services/auth_service.dart';
-import '../theme/app_theme.dart';
+import '../widgets/common.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -9,37 +12,36 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _fade;
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..forward();
 
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800));
-    _fade = CurvedAnimation(parent: _ctrl, curve: Curves.easeIn);
-    _ctrl.forward();
     _navigate();
   }
 
   Future<void> _navigate() async {
-    await Future.delayed(const Duration(milliseconds: 1800));
-    if (!mounted) return;
-
     final auth = AuthService();
-    final seen = await auth.hasSeenOnboarding();
+    final provider = context.read<AppProvider>();
+    final results = await Future.wait([
+      auth.hasSeenOnboarding(),
+      auth.getSessionUser(),
+      Future.delayed(const Duration(milliseconds: 1200)),
+    ]);
     if (!mounted) return;
+    final seen = results[0] as bool;
+    final user = results[1] as AppUser?;
 
-    if (!seen) {
-      Navigator.pushReplacementNamed(context, '/onboarding');
+    String route;
+    if (user != null) {
+      await provider.setUser(user);
+      route = provider.user!.onboarded ? '/home' : '/goals';
     } else {
-      final user = await auth.getSessionUser();
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(
-          context, user != null ? '/home' : '/login');
+      route = seen ? '/login' : '/onboarding';
     }
+    if (mounted) Navigator.pushReplacementNamed(context, route);
   }
 
   @override
@@ -51,76 +53,16 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: FadeTransition(
-        opacity: _fade,
-        child: const Center(child: _GrubOutLogo(size: 1.8)),
+      body: Center(
+        child: FadeTransition(
+          opacity: CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
+          child: ScaleTransition(
+            scale: Tween(begin: 0.92, end: 1.0)
+                .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutBack)),
+            child: const GrubOutLogo(size: 1.2),
+          ),
+        ),
       ),
     );
   }
-}
-
-// ── GrubOut logo widget (reusable) ───────────────────────────────────────────
-class _GrubOutLogo extends StatelessWidget {
-  final double size;
-  const _GrubOutLogo({this.size = 1.0});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Leaf icon
-        Container(
-          width: 64 * size,
-          height: 64 * size,
-          decoration: BoxDecoration(
-            color: kPrimary,
-            borderRadius: BorderRadius.circular(16 * size),
-          ),
-          child: Center(
-            child: Text('🌿',
-                style: TextStyle(fontSize: 36 * size)),
-          ),
-        ),
-        SizedBox(height: 14 * size),
-        RichText(
-          text: TextSpan(
-            style: TextStyle(
-              fontFamily: 'Roboto',
-              fontSize: 34 * size,
-              fontWeight: FontWeight.w900,
-              letterSpacing: -0.5,
-            ),
-            children: [
-              TextSpan(
-                  text: 'grub',
-                  style: TextStyle(color: kPrimary, fontSize: 34 * size)),
-              TextSpan(
-                  text: 'Out',
-                  style: TextStyle(
-                      color: kPrimary,
-                      fontSize: 34 * size,
-                      fontWeight: FontWeight.w300)),
-            ],
-          ),
-        ),
-        SizedBox(height: 6 * size),
-        Text(
-          'Eat Smart. Live Better.',
-          style: TextStyle(
-              color: kGrey, fontSize: 13 * size, fontWeight: FontWeight.w400),
-        ),
-      ],
-    );
-  }
-}
-
-// Make it accessible from other files
-class GrubOutLogo extends StatelessWidget {
-  final double size;
-  const GrubOutLogo({super.key, this.size = 1.0});
-
-  @override
-  Widget build(BuildContext context) => _GrubOutLogo(size: size);
 }

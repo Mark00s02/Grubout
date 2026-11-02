@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../models/models.dart';
+import '../providers/app_provider.dart';
 import '../services/food_api_service.dart';
+import '../theme/app_theme.dart';
+import '../widgets/common.dart';
+import 'food/food_detail_sheet.dart';
+import 'recipe_screen.dart';
 
+/// Recipe from TheMealDB (loads full details if only a summary was passed).
 class MealDbScreen extends StatefulWidget {
   final MealDbRecipe meal;
   const MealDbScreen({super.key, required this.meal});
@@ -12,251 +19,138 @@ class MealDbScreen extends StatefulWidget {
 }
 
 class _MealDbScreenState extends State<MealDbScreen> {
-  MealDbRecipe? _detail;
-  bool _loading = true;
+  late MealDbRecipe _meal = widget.meal;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadDetail();
+    if (_meal.ingredients.isEmpty) _loadDetail();
   }
 
   Future<void> _loadDetail() async {
-    final detail = await FoodApiService().getMealDetail(widget.meal.id);
-    if (mounted) {
-      setState(() {
-        _detail = detail ?? widget.meal;
-        _loading = false;
-      });
-    }
+    setState(() => _loading = true);
+    final full = await FoodApiService().getMealDetail(_meal.id);
+    if (!mounted) return;
+    setState(() {
+      if (full != null) _meal = full;
+      _loading = false;
+    });
+  }
+
+  Future<void> _log() async {
+    final meal = await pickMeal(context);
+    if (meal == null || !mounted) return;
+    // Library recipes have no nutrition data — let the user enter calories.
+    await showQuickAddSheet(context, mealType: meal, name: _meal.name);
   }
 
   @override
   Widget build(BuildContext context) {
-    final meal = _detail ?? widget.meal;
+    final m = _meal;
+    final c = context.colors;
+    final p = context.watch<AppProvider>();
+    final savedId = 'mdb_${m.id}';
+    final saved = p.isRecipeSaved(savedId);
+    final steps = m.instructionSteps;
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: CustomScrollView(
-        slivers: [
-          // ── Hero image app bar ──────────────────────────────────────────
-          SliverAppBar(
-            expandedHeight: 280,
-            pinned: true,
-            backgroundColor: kPrimary,
-            leading: Padding(
-              padding: const EdgeInsets.all(8),
+      body: CustomScrollView(slivers: [
+        SliverAppBar(
+          expandedHeight: 300,
+          pinned: true,
+          leading: Padding(
+            padding: const EdgeInsets.all(6),
+            child: CircleAvatar(
+              backgroundColor: c.surface.withValues(alpha: 0.92),
+              child: IconButton(
+                icon: Icon(Icons.arrow_back_rounded, color: c.text),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.all(6),
               child: CircleAvatar(
-                backgroundColor: Colors.black38,
+                backgroundColor: c.surface.withValues(alpha: 0.92),
                 child: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.white,
-                      size: 20),
-                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(saved ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                      color: saved ? kDanger : c.text),
+                  onPressed: () {
+                    HapticFeedback.selectionClick();
+                    p.toggleSavedRecipe(savedId, m.name);
+                  },
                 ),
               ),
             ),
-            flexibleSpace: FlexibleSpaceBar(
-              background: meal.imageUrl != null
-                  ? CachedNetworkImage(
-                      imageUrl: meal.imageUrl!,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) =>
-                          Container(color: kPrimary),
-                      errorWidget: (_, __, ___) => Container(
-                          color: kPrimary,
-                          child: const Center(
-                              child: Text('🍽️',
-                                  style: TextStyle(fontSize: 80)))),
-                    )
-                  : Container(
-                      color: kPrimary,
-                      child: const Center(
-                          child: Text('🍽️',
-                              style: TextStyle(fontSize: 80)))),
-            ),
-          ),
-
-          SliverToBoxAdapter(
-            child: _loading
-                ? const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(48),
-                      child: CircularProgressIndicator(color: kPrimary),
-                    ),
-                  )
-                : _Body(meal: meal),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Body extends StatelessWidget {
-  final MealDbRecipe meal;
-  const _Body({required this.meal});
-
-  @override
-  Widget build(BuildContext context) {
-    final ingredients = meal.ingredientLines;
-    final steps = meal.instructionSteps;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 40),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Title + tags ────────────────────────────────────────────────
-          Text(meal.name,
-              style: const TextStyle(
-                  fontSize: 22, fontWeight: FontWeight.w800, color: kDark)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8, runSpacing: 4,
-            children: [
-              if (meal.category != null)
-                _Tag(meal.category!,
-                    color: kPrimary.withValues(alpha: 0.12),
-                    textColor: kPrimary),
-              if (meal.area != null)
-                _Tag(meal.area!,
-                    color: const Color(0xFF2196F3).withValues(alpha: 0.1),
-                    textColor: const Color(0xFF1565C0)),
-            ],
-          ),
-
-          const SizedBox(height: 24),
-
-          // ── Ingredients ─────────────────────────────────────────────────
-          if (ingredients.isNotEmpty) ...[
-            const _SectionTitle('Ingredients'),
-            const SizedBox(height: 10),
-            ...ingredients.map((line) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 6, height: 6,
-                        margin: const EdgeInsets.only(top: 6, right: 10),
-                        decoration: const BoxDecoration(
-                            color: kPrimary, shape: BoxShape.circle),
-                      ),
-                      Expanded(
-                          child: Text(line,
-                              style: const TextStyle(
-                                  fontSize: 14, color: kDark, height: 1.4))),
-                    ],
-                  ),
-                )),
-            const SizedBox(height: 24),
+            const SizedBox(width: 8),
           ],
-
-          // ── Instructions ─────────────────────────────────────────────────
-          if (steps.isNotEmpty) ...[
-            const _SectionTitle('Instructions'),
-            const SizedBox(height: 10),
-            ...steps.asMap().entries.map((e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 26, height: 26,
-                        margin: const EdgeInsets.only(right: 12),
-                        decoration: BoxDecoration(
-                          color: kPrimary,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Center(
-                          child: Text('${e.key + 1}',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700)),
-                        ),
-                      ),
-                      Expanded(
-                        child: Text(e.value,
-                            style: const TextStyle(
-                                fontSize: 14,
-                                color: kDark,
-                                height: 1.5)),
-                      ),
-                    ],
+          flexibleSpace: FlexibleSpaceBar(background: NetImage(m.imageUrl)),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(m.name, style: context.text.headlineSmall),
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, children: [
+                if (m.area != null) Pill(m.area!, icon: Icons.public_rounded),
+                if (m.category != null) Pill(m.category!, icon: Icons.category_rounded, color: kProteinColor),
+              ]),
+              if (_loading)
+                const Padding(padding: EdgeInsets.all(40), child: Center(child: CircularProgressIndicator())),
+              if (m.ingredients.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Text('Ingredients', style: context.text.titleMedium),
+                const SizedBox(height: 8),
+                for (final line in m.ingredientLines)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Padding(padding: EdgeInsets.only(top: 7), child: Icon(Icons.circle, size: 6, color: kPrimary)),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(line, style: const TextStyle(height: 1.4))),
+                    ]),
                   ),
-                )),
-          ] else ...[
-            const _SectionTitle('Instructions'),
-            const SizedBox(height: 10),
-            Text(
-              meal.instructions?.trim().isNotEmpty == true
-                  ? meal.instructions!
-                  : 'No instructions available for this recipe.',
-              style: const TextStyle(
-                  fontSize: 14, color: kDark, height: 1.6),
-            ),
-          ],
-
-          // ── YouTube hint ──────────────────────────────────────────────
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFF0000).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(children: [
-              const Icon(Icons.play_circle_outline,
-                  color: Color(0xFFCC0000), size: 28),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Video Tutorial',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                            color: kDark)),
-                    Text('Search this recipe on YouTube for a visual guide',
-                        style: TextStyle(fontSize: 12, color: kGrey)),
-                  ],
-                ),
-              ),
+              ],
+              if (steps.isNotEmpty) ...[
+                const SizedBox(height: 24),
+                Text('Directions', style: context.text.titleMedium),
+                const SizedBox(height: 8),
+                for (var i = 0; i < steps.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      CircleAvatar(
+                        radius: 13,
+                        backgroundColor: kPrimary.withValues(alpha: 0.12),
+                        child: Text('${i + 1}',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: kPrimary)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(steps[i], style: const TextStyle(height: 1.5))),
+                    ]),
+                  ),
+              ],
+              const SizedBox(height: 16),
+              Text('Recipe from TheMealDB. Nutrition is not provided for library recipes.',
+                  style: TextStyle(fontSize: 12, color: c.textMuted)),
+              const SizedBox(height: 80),
             ]),
           ),
-        ],
+        ),
+      ]),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: FilledButton.icon(
+            onPressed: _log,
+            icon: const Icon(Icons.add_task_rounded),
+            label: const Text('Log to diary'),
+          ),
+        ),
       ),
     );
   }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String text;
-  const _SectionTitle(this.text);
-
-  @override
-  Widget build(BuildContext context) => Text(text,
-      style: const TextStyle(
-          fontSize: 17, fontWeight: FontWeight.w700, color: kDark));
-}
-
-class _Tag extends StatelessWidget {
-  final String label;
-  final Color color;
-  final Color textColor;
-  const _Tag(this.label, {required this.color, required this.textColor});
-
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-            color: color, borderRadius: BorderRadius.circular(20)),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: textColor)),
-      );
 }

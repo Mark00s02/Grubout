@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../services/auth_service.dart';
 import '../../providers/app_provider.dart';
+import '../../services/auth_service.dart';
 import '../../theme/app_theme.dart';
-import '../splash_screen.dart';
+import '../profile/legal_screen.dart';
+import 'login_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -13,258 +14,151 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  final _firstCtrl    = TextEditingController();
-  final _lastCtrl     = TextEditingController();
-  final _emailCtrl    = TextEditingController();
-  final _passCtrl     = TextEditingController();
-  final _confirmCtrl  = TextEditingController();
-
-  int  _step      = 0;
-  bool _obscure   = true;
-  bool _obscure2  = true;
-  bool _agreed    = false;
-  bool _loading   = false;
+  final _form = GlobalKey<FormState>();
+  final _firstCtrl = TextEditingController();
+  final _lastCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _obscure = true;
+  bool _loading = false;
   String? _error;
 
   @override
   void dispose() {
-    _firstCtrl.dispose(); _lastCtrl.dispose();
-    _emailCtrl.dispose(); _passCtrl.dispose(); _confirmCtrl.dispose();
+    for (final c in [_firstCtrl, _lastCtrl, _emailCtrl, _passCtrl]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  void _nextStep() {
-    final first = _firstCtrl.text.trim();
-    final last  = _lastCtrl.text.trim();
-    if (first.isEmpty || last.isEmpty) {
-      setState(() => _error = 'Please fill in all fields');
-      return;
-    }
-    setState(() { _step = 1; _error = null; });
-  }
-
-  Future<void> _register() async {
-    final email = _emailCtrl.text.trim();
-    final pass  = _passCtrl.text;
-    final conf  = _confirmCtrl.text;
-
-    if (email.isEmpty || pass.isEmpty || conf.isEmpty) {
-      setState(() => _error = 'Please fill in all fields');
-      return;
-    }
-    if (pass != conf) {
-      setState(() => _error = 'Passwords do not match');
-      return;
-    }
-    if (!_agreed) {
-      setState(() => _error = 'Please agree to the Terms and Conditions');
-      return;
-    }
-
-    setState(() { _loading = true; _error = null; });
+  Future<void> _signup() async {
+    if (!_form.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final user = await AuthService().register(
-        firstName: _firstCtrl.text.trim(),
-        lastName:  _lastCtrl.text.trim(),
-        email:     email,
-        password:  pass,
+        firstName: _firstCtrl.text,
+        lastName: _lastCtrl.text,
+        email: _emailCtrl.text,
+        password: _passCtrl.text,
       );
       if (!mounted) return;
-      context.read<AppProvider>().setUser(user);
-      final nav = Navigator.of(context, rootNavigator: true);
-      if (nav.canPop()) { nav.pop(); }
-      else { nav.pushReplacementNamed('/home'); }
+      await context.read<AppProvider>().setUser(user);
+      if (mounted) Navigator.of(context).pushNamedAndRemoveUntil('/goals', (_) => false);
     } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _loading = false; });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 24),
-
-              // ── Back + Logo ──
+    final c = context.colors;
+    return AuthScaffold(
+      title: 'Create your account',
+      subtitle: 'Takes 30 seconds. Then we build your plan.',
+      children: [
+        Form(
+          key: _form,
+          child: AutofillGroup(
+            child: Column(children: [
+              if (_error != null) ErrorBanner(_error!),
               Row(children: [
-                if (_step == 1)
-                  GestureDetector(
-                    onTap: () => setState(() { _step = 0; _error = null; }),
-                    child: const Icon(Icons.arrow_back, color: kDark),
-                  )
-                else
-                  GestureDetector(
-                    onTap: () => Navigator.pop(context),
-                    child: const Icon(Icons.arrow_back, color: kDark),
+                Expanded(
+                  child: TextFormField(
+                    controller: _firstCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    autofillHints: const [AutofillHints.givenName],
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(hintText: 'First name'),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                   ),
-              ]),
-              const SizedBox(height: 32),
-              const Center(child: GrubOutLogo()),
-              const SizedBox(height: 36),
-
-              Text(
-                _step == 0 ? "Let's Get Started" : 'Last step!',
-                style: const TextStyle(
-                    fontSize: 26, fontWeight: FontWeight.w800, color: kDark),
-              ),
-              const SizedBox(height: 24),
-
-              if (_step == 0) ..._step0() else ..._step1(),
-
-              // ── Error ──
-              if (_error != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Text(_error!,
-                      style: TextStyle(
-                          color: Colors.red.shade700, fontSize: 13)),
                 ),
-              ],
-
-              const SizedBox(height: 20),
-
-              // ── CTA button ──
-              SizedBox(
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: _loading ? null : (_step == 0 ? _nextStep : _register),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: kPrimary,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextFormField(
+                    controller: _lastCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    autofillHints: const [AutofillHints.familyName],
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(hintText: 'Last name'),
                   ),
-                  child: _loading
-                      ? const SizedBox(
-                          width: 20, height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : Text(_step == 0 ? 'Next' : 'Sign up',
-                          style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white)),
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // ── Login link ──
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Text('Already have an account? ',
-                    style: TextStyle(
-                        color: Colors.grey.shade600, fontSize: 13)),
-                GestureDetector(
-                  onTap: () => Navigator.pushReplacementNamed(context, '/login'),
-                  child: const Text('Login',
-                      style: TextStyle(
-                          color: kPrimary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13)),
                 ),
               ]),
-              const SizedBox(height: 32),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  List<Widget> _step0() => [
-        _Label('First Name'),
-        const SizedBox(height: 6),
-        TextField(
-            controller: _firstCtrl,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'Your first name')),
-        const SizedBox(height: 14),
-        _Label('Last Name'),
-        const SizedBox(height: 6),
-        TextField(
-            controller: _lastCtrl,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'Your last name')),
-      ];
-
-  List<Widget> _step1() => [
-        _Label('Email'),
-        const SizedBox(height: 6),
-        TextField(
-            controller: _emailCtrl,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(hintText: 'Your email')),
-        const SizedBox(height: 14),
-        _Label('Password'),
-        const SizedBox(height: 6),
-        TextField(
-          controller: _passCtrl,
-          obscureText: _obscure,
-          decoration: InputDecoration(
-            hintText: 'Your password',
-            suffixIcon: IconButton(
-              icon: Icon(
-                  _obscure ? Icons.visibility_off : Icons.visibility,
-                  color: kGrey, size: 20),
-              onPressed: () => setState(() => _obscure = !_obscure),
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        _Label('Re-type Password'),
-        const SizedBox(height: 6),
-        TextField(
-          controller: _confirmCtrl,
-          obscureText: _obscure2,
-          decoration: InputDecoration(
-            hintText: 'Re-type your password',
-            suffixIcon: IconButton(
-              icon: Icon(
-                  _obscure2 ? Icons.visibility_off : Icons.visibility,
-                  color: kGrey, size: 20),
-              onPressed: () => setState(() => _obscure2 = !_obscure2),
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(children: [
-          Checkbox(
-            value: _agreed,
-            activeColor: kPrimary,
-            onChanged: (v) => setState(() => _agreed = v ?? false),
-          ),
-          const Expanded(
-            child: Text.rich(
-              TextSpan(
-                text: 'I agree with the ',
-                style: TextStyle(fontSize: 13, color: kGrey),
-                children: [
-                  TextSpan(
-                      text: 'Terms and Conditions',
-                      style: TextStyle(
-                          color: kPrimary, fontWeight: FontWeight.w600)),
-                ],
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.email],
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                    hintText: 'Email', prefixIcon: Icon(Icons.mail_outline_rounded)),
+                validator: (v) {
+                  final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v?.trim() ?? '');
+                  return ok ? null : 'Enter a valid email';
+                },
               ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: _passCtrl,
+                obscureText: _obscure,
+                autofillHints: const [AutofillHints.newPassword],
+                onFieldSubmitted: (_) => _signup(),
+                decoration: InputDecoration(
+                  hintText: 'Password (8+ characters)',
+                  prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+                validator: (v) => (v == null || v.length < 8) ? 'Use at least 8 characters' : null,
+              ),
+            ]),
+          ),
+        ),
+        const SizedBox(height: 24),
+        FilledButton(
+          onPressed: _loading ? null : _signup,
+          child: _loading
+              ? const SizedBox(
+                  width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+              : const Text('Create account'),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('By continuing you agree to our ', style: TextStyle(fontSize: 12, color: c.textMuted)),
+            GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LegalScreen.terms())),
+              child: const Text('Terms', style: TextStyle(fontSize: 12, color: kPrimary, fontWeight: FontWeight.w700)),
             ),
+            Text(' and ', style: TextStyle(fontSize: 12, color: c.textMuted)),
+            GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LegalScreen.privacy())),
+              child: const Text('Privacy Policy',
+                  style: TextStyle(fontSize: 12, color: kPrimary, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Text('Already have an account?', style: TextStyle(color: c.textMuted)),
+          TextButton(
+            onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+            child: const Text('Sign in'),
           ),
         ]),
-      ];
-}
-
-class _Label extends StatelessWidget {
-  final String text;
-  const _Label(this.text);
-
-  @override
-  Widget build(BuildContext context) => Text(text,
-      style: const TextStyle(
-          fontSize: 13, fontWeight: FontWeight.w600, color: kDark));
+      ],
+    );
+  }
 }

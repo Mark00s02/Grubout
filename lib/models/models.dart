@@ -1,8 +1,16 @@
 import 'package:flutter/material.dart';
 
 export '../theme/app_theme.dart'
-    show kPrimary, kDark, kBg, kCard, kGrey, kLightGrey, kDivider,
-         mealTypeColor, mealTypeEmoji, mealTypeIcon;
+    show kPrimary, kPrimaryDark, kPrimaryLight, kGold, kDanger,
+         kProteinColor, kCarbsColor, kFatColor, kWaterColor,
+         mealTypes, mealTypeColor, mealTypeIcon, mealTypeLabel;
+
+/// Dates are stored as local `yyyy-MM-dd` strings so a log never shifts days
+/// because of a timezone conversion.
+String dateKey(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+DateTime dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
 // ── Nutrition ────────────────────────────────────────────────────────────────
 class NutritionFact {
@@ -40,6 +48,10 @@ class Recipe {
     this.imageUrl,
     this.mealDbId,
   });
+
+  double get protein => nutritionFacts['Protein']?.amount ?? 0;
+  double get carbs => nutritionFacts['Total Carbs']?.amount ?? 0;
+  double get fat => nutritionFacts['Total Fat']?.amount ?? 0;
 }
 
 // ── Diet Plan ────────────────────────────────────────────────────────────────
@@ -68,15 +80,26 @@ class ScheduledMeal {
   final String mealType;
   final Recipe recipe;
   final String time;
-  bool rescheduled;
 
-  ScheduledMeal({
+  const ScheduledMeal({
     required this.mealType,
     required this.recipe,
     required this.time,
-    this.rescheduled = false,
   });
 }
+
+// ── Goals ────────────────────────────────────────────────────────────────────
+enum GoalType { lose, maintain, gain }
+
+enum Sex { male, female }
+
+const activityLevels = [
+  ('Sedentary', 'Desk job, little exercise'),
+  ('Lightly active', 'Light exercise 1–3 days/week'),
+  ('Moderately active', 'Exercise 3–5 days/week'),
+  ('Very active', 'Hard exercise 6–7 days/week'),
+  ('Athlete', 'Physical job or twice-a-day training'),
+];
 
 // ── App User ─────────────────────────────────────────────────────────────────
 class AppUser {
@@ -90,6 +113,21 @@ class AppUser {
   final String? avatarEmoji;
   final DateTime createdAt;
 
+  // Body & goal profile
+  final Sex sex;
+  final int birthYear;
+  final double heightCm;
+  final double startWeightKg;
+  final double targetWeightKg;
+  final int activityLevel;
+  final GoalType goalType;
+  final double weeklyRateKg;
+  final int proteinPct;
+  final int carbsPct;
+  final int fatPct;
+  final int waterGoalMl;
+  final bool onboarded;
+
   const AppUser({
     this.id,
     required this.firstName,
@@ -100,9 +138,29 @@ class AppUser {
     this.isPremium = false,
     this.avatarEmoji,
     required this.createdAt,
+    this.sex = Sex.female,
+    this.birthYear = 1995,
+    this.heightCm = 165,
+    this.startWeightKg = 65,
+    this.targetWeightKg = 60,
+    this.activityLevel = 1,
+    this.goalType = GoalType.lose,
+    this.weeklyRateKg = 0.5,
+    this.proteinPct = 25,
+    this.carbsPct = 45,
+    this.fatPct = 30,
+    this.waterGoalMl = 2500,
+    this.onboarded = false,
   });
 
-  String get fullName => '$firstName $lastName';
+  String get fullName => '$firstName $lastName'.trim();
+  String get initials =>
+      '${firstName.isNotEmpty ? firstName[0] : ''}${lastName.isNotEmpty ? lastName[0] : ''}'.toUpperCase();
+  int get age => DateTime.now().year - birthYear;
+
+  double get proteinGoalG => calorieGoal * proteinPct / 100 / 4;
+  double get carbsGoalG => calorieGoal * carbsPct / 100 / 4;
+  double get fatGoalG => calorieGoal * fatPct / 100 / 9;
 
   AppUser copyWith({
     int? id,
@@ -113,6 +171,19 @@ class AppUser {
     int? calorieGoal,
     bool? isPremium,
     String? avatarEmoji,
+    Sex? sex,
+    int? birthYear,
+    double? heightCm,
+    double? startWeightKg,
+    double? targetWeightKg,
+    int? activityLevel,
+    GoalType? goalType,
+    double? weeklyRateKg,
+    int? proteinPct,
+    int? carbsPct,
+    int? fatPct,
+    int? waterGoalMl,
+    bool? onboarded,
   }) =>
       AppUser(
         id: id ?? this.id,
@@ -124,6 +195,19 @@ class AppUser {
         isPremium: isPremium ?? this.isPremium,
         avatarEmoji: avatarEmoji ?? this.avatarEmoji,
         createdAt: createdAt,
+        sex: sex ?? this.sex,
+        birthYear: birthYear ?? this.birthYear,
+        heightCm: heightCm ?? this.heightCm,
+        startWeightKg: startWeightKg ?? this.startWeightKg,
+        targetWeightKg: targetWeightKg ?? this.targetWeightKg,
+        activityLevel: activityLevel ?? this.activityLevel,
+        goalType: goalType ?? this.goalType,
+        weeklyRateKg: weeklyRateKg ?? this.weeklyRateKg,
+        proteinPct: proteinPct ?? this.proteinPct,
+        carbsPct: carbsPct ?? this.carbsPct,
+        fatPct: fatPct ?? this.fatPct,
+        waterGoalMl: waterGoalMl ?? this.waterGoalMl,
+        onboarded: onboarded ?? this.onboarded,
       );
 
   Map<String, dynamic> toMap() => {
@@ -136,6 +220,19 @@ class AppUser {
         'is_premium': isPremium ? 1 : 0,
         'avatar_emoji': avatarEmoji,
         'created_at': createdAt.toIso8601String(),
+        'sex': sex.name,
+        'birth_year': birthYear,
+        'height_cm': heightCm,
+        'start_weight_kg': startWeightKg,
+        'target_weight_kg': targetWeightKg,
+        'activity_level': activityLevel,
+        'goal_type': goalType.name,
+        'weekly_rate_kg': weeklyRateKg,
+        'protein_pct': proteinPct,
+        'carbs_pct': carbsPct,
+        'fat_pct': fatPct,
+        'water_goal_ml': waterGoalMl,
+        'onboarded': onboarded ? 1 : 0,
       };
 
   factory AppUser.fromMap(Map<String, dynamic> m) => AppUser(
@@ -148,6 +245,19 @@ class AppUser {
         isPremium: (m['is_premium'] as int?) == 1,
         avatarEmoji: m['avatar_emoji'] as String?,
         createdAt: DateTime.parse(m['created_at'] as String),
+        sex: Sex.values.asNameMap()[m['sex']] ?? Sex.female,
+        birthYear: (m['birth_year'] as int?) ?? 1995,
+        heightCm: (m['height_cm'] as num?)?.toDouble() ?? 165,
+        startWeightKg: (m['start_weight_kg'] as num?)?.toDouble() ?? 65,
+        targetWeightKg: (m['target_weight_kg'] as num?)?.toDouble() ?? 60,
+        activityLevel: (m['activity_level'] as int?) ?? 1,
+        goalType: GoalType.values.asNameMap()[m['goal_type']] ?? GoalType.lose,
+        weeklyRateKg: (m['weekly_rate_kg'] as num?)?.toDouble() ?? 0.5,
+        proteinPct: (m['protein_pct'] as int?) ?? 25,
+        carbsPct: (m['carbs_pct'] as int?) ?? 45,
+        fatPct: (m['fat_pct'] as int?) ?? 30,
+        waterGoalMl: (m['water_goal_ml'] as int?) ?? 2500,
+        onboarded: (m['onboarded'] as int?) == 1,
       );
 }
 
@@ -162,6 +272,7 @@ class FoodLog {
   final double fat;
   final double servingAmount;
   final String servingUnit;
+  final double? grams;
   final String mealType;
   final DateTime logDate;
   final String? fdcId;
@@ -176,12 +287,20 @@ class FoodLog {
     this.fat = 0,
     required this.servingAmount,
     this.servingUnit = 'g',
+    this.grams,
     required this.mealType,
     required this.logDate,
     this.fdcId,
   });
 
-  FoodLog copyWith({int? id}) => FoodLog(
+  String get servingText {
+    final amt = servingAmount == servingAmount.roundToDouble()
+        ? servingAmount.round().toString()
+        : servingAmount.toStringAsFixed(1);
+    return '$amt $servingUnit';
+  }
+
+  FoodLog copyWith({int? id, DateTime? logDate, String? mealType}) => FoodLog(
         id: id ?? this.id,
         userId: userId,
         foodName: foodName,
@@ -191,10 +310,28 @@ class FoodLog {
         fat: fat,
         servingAmount: servingAmount,
         servingUnit: servingUnit,
-        mealType: mealType,
-        logDate: logDate,
+        grams: grams,
+        mealType: mealType ?? this.mealType,
+        logDate: logDate ?? this.logDate,
         fdcId: fdcId,
       );
+
+  /// Rebuilds a per-100 g food so a past log can be re-used from "Recent".
+  FoodSearchResult toFood() {
+    final g = (grams != null && grams! > 0) ? grams! : 100.0;
+    final f = 100 / g;
+    return FoodSearchResult(
+      id: fdcId ?? 'log_$foodName',
+      name: foodName,
+      caloriesPer100g: calories * f,
+      proteinPer100g: protein * f,
+      carbsPer100g: carbs * f,
+      fatPer100g: fat * f,
+      servingGrams: g,
+      servingLabel: servingText,
+      source: FoodSource.recent,
+    );
+  }
 
   Map<String, dynamic> toMap() => {
         if (id != null) 'id': id,
@@ -206,8 +343,9 @@ class FoodLog {
         'fat': fat,
         'serving_amount': servingAmount,
         'serving_unit': servingUnit,
+        'grams': grams,
         'meal_type': mealType,
-        'log_date': logDate.toIso8601String().split('T')[0],
+        'log_date': dateKey(logDate),
         'fdc_id': fdcId,
       };
 
@@ -221,6 +359,7 @@ class FoodLog {
         fat: (m['fat'] as num?)?.toDouble() ?? 0,
         servingAmount: (m['serving_amount'] as num).toDouble(),
         servingUnit: (m['serving_unit'] as String?) ?? 'g',
+        grams: (m['grams'] as num?)?.toDouble(),
         mealType: m['meal_type'] as String,
         logDate: DateTime.parse(m['log_date'] as String),
         fdcId: m['fdc_id'] as String?,
@@ -245,13 +384,22 @@ class ExerciseLog {
     required this.logDate,
   });
 
+  ExerciseLog copyWith({int? id}) => ExerciseLog(
+        id: id ?? this.id,
+        userId: userId,
+        name: name,
+        durationMinutes: durationMinutes,
+        caloriesBurned: caloriesBurned,
+        logDate: logDate,
+      );
+
   Map<String, dynamic> toMap() => {
         if (id != null) 'id': id,
         'user_id': userId,
         'name': name,
         'duration_minutes': durationMinutes,
         'calories_burned': caloriesBurned,
-        'log_date': logDate.toIso8601String().split('T')[0],
+        'log_date': dateKey(logDate),
       };
 
   factory ExerciseLog.fromMap(Map<String, dynamic> m) => ExerciseLog(
@@ -264,30 +412,99 @@ class ExerciseLog {
       );
 }
 
-// ── Food Search Result ────────────────────────────────────────────────────────
+// ── Weight entry ─────────────────────────────────────────────────────────────
+class WeightEntry {
+  final DateTime date;
+  final double weightKg;
+  const WeightEntry(this.date, this.weightKg);
+}
+
+// ── Fasting ──────────────────────────────────────────────────────────────────
+class FastingSession {
+  final int? id;
+  final DateTime start;
+  final DateTime? end;
+  final int targetHours;
+
+  const FastingSession({this.id, required this.start, this.end, required this.targetHours});
+
+  bool get isActive => end == null;
+  Duration get elapsed => (end ?? DateTime.now()).difference(start);
+  double get progress =>
+      (elapsed.inSeconds / (targetHours * 3600)).clamp(0.0, 1.0).toDouble();
+  bool get completed => elapsed.inMinutes >= targetHours * 60;
+
+  factory FastingSession.fromMap(Map<String, dynamic> m) => FastingSession(
+        id: m['id'] as int?,
+        start: DateTime.parse(m['start_time'] as String),
+        end: m['end_time'] == null ? null : DateTime.parse(m['end_time'] as String),
+        targetHours: m['target_hours'] as int,
+      );
+}
+
+// ── Daily summary (charts / insights) ────────────────────────────────────────
+class DaySummary {
+  final DateTime date;
+  final double calories;
+  final double protein;
+  final double carbs;
+  final double fat;
+  final double exercise;
+  const DaySummary({
+    required this.date,
+    this.calories = 0,
+    this.protein = 0,
+    this.carbs = 0,
+    this.fat = 0,
+    this.exercise = 0,
+  });
+}
+
+// ── Food ─────────────────────────────────────────────────────────────────────
+enum FoodSource { local, usda, openFoodFacts, custom, recent, barcode }
+
 class FoodSearchResult {
   final String id;
   final String name;
+  final String? brand;
   final double caloriesPer100g;
   final double proteinPer100g;
   final double carbsPer100g;
   final double fatPer100g;
   final String? description;
   final bool isLocal;
+  /// Grams in one default serving (e.g. 1 cup of rice = 158 g). Null = 100 g.
+  final double? servingGrams;
+  final String? servingLabel;
+  final FoodSource source;
 
   const FoodSearchResult({
     required this.id,
     required this.name,
     required this.caloriesPer100g,
+    this.brand,
     this.proteinPer100g = 0,
     this.carbsPer100g = 0,
     this.fatPer100g = 0,
     this.description,
     this.isLocal = false,
+    this.servingGrams,
+    this.servingLabel,
+    this.source = FoodSource.local,
   });
 
-  double caloriesForServing(double grams) =>
-      caloriesPer100g * grams / 100;
+  double caloriesForServing(double grams) => caloriesPer100g * grams / 100;
+
+  String get subtitle {
+    final parts = <String>[
+      if (brand != null && brand!.isNotEmpty) brand!,
+      if (servingGrams != null)
+        '${caloriesForServing(servingGrams!).round()} kcal · ${servingLabel ?? '${servingGrams!.round()} g'}'
+      else
+        '${caloriesPer100g.round()} kcal · 100 g',
+    ];
+    return parts.join(' · ');
+  }
 }
 
 // ── TheMealDB Recipe ──────────────────────────────────────────────────────────
@@ -321,17 +538,15 @@ class MealDbRecipe {
         },
       );
 
-  /// Splits raw instruction text into individual numbered steps.
+  /// Splits raw instruction text into individual steps.
   List<String> get instructionSteps {
     if (instructions == null || instructions!.trim().isEmpty) return [];
-    // Split on newlines, filter blank lines
     final lines = instructions!
         .split(RegExp(r'\r?\n'))
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty)
+        .map((l) => l.replaceFirst(RegExp(r'^(step\s*)?\d+[\.\):]?\s*', caseSensitive: false), '').trim())
+        .where((l) => l.length > 2)
         .toList();
     if (lines.length >= 2) return lines;
-    // Fallback: split on '. ' for single-paragraph instructions
     return instructions!
         .split(RegExp(r'\.\s+'))
         .map((s) => s.trim())

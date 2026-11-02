@@ -1,0 +1,68 @@
+# Codemagic CI — builds GrubOut on a cloud Mac and uploads it to TestFlight.
+# Setup steps are in DEPLOY_IOS.md.
+workflows:
+  ios-testflight:
+    name: iOS → TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      # Must match the name you give the App Store Connect API key in
+      # Codemagic → Team settings → Integrations → Developer Portal.
+      app_store_connect: GrubOut ASC Key
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.grubout.app
+      vars:
+        # App Store Connect → your app → App Information → "Apple ID" (a number).
+        APP_STORE_APPLE_ID: "0000000000"
+      # Optional: create a group named "grubout" containing USDA_API_KEY.
+      groups:
+        - grubout
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Run tests
+        script: flutter test
+      - name: Install CocoaPods
+        script: cd ios && pod install --repo-update
+      - name: Apply signing profiles
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          flutter build ipa --release \
+            --build-name=1.0.0 \
+            --build-number=$((LATEST + 1)) \
+            --export-options-plist=/Users/builder/export_options.plist \
+            --dart-define=USDA_API_KEY=${USDA_API_KEY:-DEMO_KEY}
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+
+  android-apk:
+    name: Android APK (for testing)
+    max_build_duration: 45
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+    scripts:
+      - name: Get Flutter packages
+        script: flutter pub get
+      - name: Build APK
+        script: flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk

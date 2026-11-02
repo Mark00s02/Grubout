@@ -1,10 +1,47 @@
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import '../models/models.dart';
 import '../data/mock_data.dart';
-import '../widgets/recipe_card.dart';
+import '../models/models.dart';
 import '../providers/app_provider.dart';
+import '../theme/app_theme.dart';
+import '../widgets/common.dart';
+
+/// Opens a sheet to pick a meal; returns the chosen meal type.
+Future<String?> pickMeal(BuildContext context, {String title = 'Log to which meal?'}) =>
+    showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(title, style: ctx.text.titleLarge),
+            const SizedBox(height: 16),
+            Row(children: [
+              for (final m in mealTypes)
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => Navigator.pop(ctx, m),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Column(children: [
+                        CircleAvatar(
+                          radius: 26,
+                          backgroundColor: mealTypeColor(m),
+                          child: Icon(mealTypeIcon(m), color: Colors.white),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(mealTypeLabel(m), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      ]),
+                    ),
+                  ),
+                ),
+            ]),
+          ]),
+        ),
+      ),
+    );
 
 class RecipeScreen extends StatefulWidget {
   final Recipe recipe;
@@ -14,227 +51,179 @@ class RecipeScreen extends StatefulWidget {
   State<RecipeScreen> createState() => _RecipeScreenState();
 }
 
-class _RecipeScreenState extends State<RecipeScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _RecipeScreenState extends State<RecipeScreen> {
   int _servings = 1;
-  bool _isFavorite = false;
-  bool _showAddedNotif = false;
+  bool _nutrition = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    _loadFavorite();
-  }
-
-  Future<void> _loadFavorite() async {
-    final provider = context.read<AppProvider>();
-    if (provider.user != null) {
-      final saved =
-          await provider.isRecipeSaved(widget.recipe.id);
-      if (mounted) setState(() => _isFavorite = saved);
-    }
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  int get _totalCals =>
-      widget.recipe.caloriesPerServing * _servings;
-
-  void _toggleFavorite() {
-    final provider = context.read<AppProvider>();
-    provider.toggleSavedRecipe(widget.recipe.id, widget.recipe.name);
-    setState(() => _isFavorite = !_isFavorite);
-  }
-
-  void _showAddToMeal() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _AddToMealSheet(
-        onAdd: (mealType) {
-          Navigator.pop(context);
-          setState(() => _showAddedNotif = true);
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) setState(() => _showAddedNotif = false);
-          });
-        },
-      ),
-    );
+  Future<void> _log() async {
+    final meal = await pickMeal(context);
+    if (meal == null || !mounted) return;
+    final p = context.read<AppProvider>();
+    final r = widget.recipe;
+    await p.addFoodLog(FoodLog(
+      userId: p.user!.id!,
+      foodName: r.name,
+      calories: (r.caloriesPerServing * _servings).toDouble(),
+      protein: r.protein * _servings,
+      carbs: r.carbs * _servings,
+      fat: r.fat * _servings,
+      servingAmount: _servings.toDouble(),
+      servingUnit: _servings == 1 ? 'serving' : 'servings',
+      mealType: meal,
+      logDate: p.selectedDate,
+      fdcId: 'recipe_${r.id}',
+    ));
+    if (!mounted) return;
+    HapticFeedback.lightImpact();
+    showSnack(context, '${r.name} added to ${mealTypeLabel(meal)}');
   }
 
   @override
   Widget build(BuildContext context) {
     final r = widget.recipe;
-    final others = recipes.where((x) => x.id != r.id).toList();
+    final c = context.colors;
+    final p = context.watch<AppProvider>();
+    final saved = p.isRecipeSaved(r.id);
+    final others = recipes.where((x) => x.id != r.id).take(6).toList();
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Stack(children: [
-        CustomScrollView(
-          slivers: [
-            // ── Photo header ─────────────────────────────────────────────
-            SliverAppBar(
-              expandedHeight: 240,
-              pinned: true,
-              backgroundColor: r.color,
-              elevation: 0,
-              leading: Padding(
-                padding: const EdgeInsets.all(8),
-                child: _CircleIconBtn(
-                  icon: Icons.arrow_back,
-                  onTap: () => Navigator.pop(context),
-                ),
-              ),
-              actions: [
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: _CircleIconBtn(
-                    icon: _isFavorite
-                        ? Icons.favorite
-                        : Icons.favorite_border,
-                    color: _isFavorite ? Colors.red : null,
-                    onTap: _toggleFavorite,
-                  ),
-                ),
-              ],
-              flexibleSpace: FlexibleSpaceBar(
-                background: _RecipeHero(recipe: r),
-              ),
+      body: CustomScrollView(slivers: [
+        SliverAppBar(
+          expandedHeight: 300,
+          pinned: true,
+          stretch: true,
+          leading: _CircleButton(icon: Icons.arrow_back_rounded, onTap: () => Navigator.pop(context)),
+          actions: [
+            _CircleButton(
+              icon: saved ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              color: saved ? kDanger : null,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                p.toggleSavedRecipe(r.id, r.name);
+              },
             ),
-
-            // ── Recipe name + tags ─────────────────────────────────────
-            SliverToBoxAdapter(
-              child: Padding(
-                padding:
-                    const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(r.name.toUpperCase(),
-                        style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            color: kDark,
-                            letterSpacing: 0.5)),
-                    const SizedBox(height: 4),
-                    Text('${r.caloriesPerServing} calories per serving',
-                        style: const TextStyle(
-                            color: kGrey, fontSize: 13)),
-                    const SizedBox(height: 12),
-                    // Tags
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: r.tags
-                          .map((t) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: r.color.withValues(alpha: 0.12),
-                                  borderRadius:
-                                      BorderRadius.circular(20),
-                                ),
-                                child: Text(t,
-                                    style: TextStyle(
-                                        fontSize: 11,
-                                        color: r.color,
-                                        fontWeight: FontWeight.w600)),
-                              ))
-                          .toList(),
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Tab bar ────────────────────────────────────────────────
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _TabDelegate(
-                TabBar(
-                  controller: _tabController,
-                  indicatorColor: kPrimary,
-                  labelColor: kPrimary,
-                  unselectedLabelColor: kGrey,
-                  labelStyle: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 14),
-                  tabs: const [
-                    Tab(text: 'Recipe'),
-                    Tab(text: 'Nutritional Facts'),
-                  ],
-                ),
-              ),
-            ),
-
-            // ── Tab content ────────────────────────────────────────────
-            SliverFillRemaining(
-              child: TabBarView(
-                controller: _tabController,
-                children: [
-                  _RecipeTab(
-                    recipe: r,
-                    servings: _servings,
-                    totalCals: _totalCals,
-                    onServingsChanged: (v) =>
-                        setState(() => _servings = v),
-                    otherRecipes: others,
-                    onRecipeTap: (rec) => Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => RecipeScreen(recipe: rec)),
-                    ),
-                  ),
-                  _NutritionTab(recipe: r),
-                ],
-              ),
-            ),
+            const SizedBox(width: 8),
           ],
+          flexibleSpace: FlexibleSpaceBar(
+            background: NetImage(r.imageUrl, fallbackEmoji: r.emoji),
+          ),
         ),
-
-        // ── Success notification ───────────────────────────────────────
-        if (_showAddedNotif)
-          Positioned(
-            bottom: 100, left: 16, right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 20, vertical: 14),
-              decoration: BoxDecoration(
-                  color: kPrimary,
-                  borderRadius: BorderRadius.circular(12)),
-              child: const Row(children: [
-                Text('✅', style: TextStyle(fontSize: 16)),
-                SizedBox(width: 10),
-                Text('Added to your meal plan!',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600)),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(r.name, style: context.text.headlineSmall),
+              const SizedBox(height: 12),
+              Row(children: [
+                _Stat('${r.caloriesPerServing * _servings}', 'kcal', kPrimary),
+                _Stat('${(r.protein * _servings).round()}g', 'protein', kProteinColor),
+                _Stat('${(r.carbs * _servings).round()}g', 'carbs', kCarbsColor),
+                _Stat('${(r.fat * _servings).round()}g', 'fat', kFatColor),
               ]),
+              const SizedBox(height: 16),
+              Wrap(spacing: 6, runSpacing: 6, children: [for (final t in r.tags) Pill(t)]),
+              const SizedBox(height: 20),
+              Row(children: [
+                Text('Servings', style: context.text.titleMedium),
+                const Spacer(),
+                StepperButton(
+                    icon: Icons.remove_rounded,
+                    onTap: () => setState(() => _servings = (_servings - 1).clamp(1, 20))),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text('$_servings', style: context.text.titleLarge),
+                ),
+                StepperButton(
+                    icon: Icons.add_rounded, onTap: () => setState(() => _servings = (_servings + 1).clamp(1, 20))),
+              ]),
+              const SizedBox(height: 20),
+              SegmentedButton<bool>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Recipe')),
+                  ButtonSegment(value: true, label: Text('Nutrition facts')),
+                ],
+                selected: {_nutrition},
+                onSelectionChanged: (s) => setState(() => _nutrition = s.first),
+              ),
+              const SizedBox(height: 20),
+              if (!_nutrition) ...[
+                Text('Ingredients', style: context.text.titleMedium),
+                const SizedBox(height: 8),
+                for (final i in r.ingredients)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 7),
+                        child: Icon(Icons.circle, size: 6, color: kPrimary),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(i, style: const TextStyle(height: 1.4))),
+                    ]),
+                  ),
+                const SizedBox(height: 20),
+                Text('Directions', style: context.text.titleMedium),
+                const SizedBox(height: 8),
+                for (var i = 0; i < r.directions.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      CircleAvatar(
+                        radius: 13,
+                        backgroundColor: kPrimary.withValues(alpha: 0.12),
+                        child: Text('${i + 1}',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: kPrimary)),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(r.directions[i], style: const TextStyle(height: 1.5))),
+                    ]),
+                  ),
+              ] else
+                _NutritionLabel(recipe: r, servings: _servings),
+              const SizedBox(height: 24),
+              Text('More recipes', style: context.text.titleMedium),
+              const SizedBox(height: 12),
+            ]),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: SizedBox(
+            height: 170,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              scrollDirection: Axis.horizontal,
+              itemCount: others.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) => GestureDetector(
+                onTap: () => Navigator.pushReplacement(
+                    context, MaterialPageRoute(builder: (_) => RecipeScreen(recipe: others[i]))),
+                child: SizedBox(
+                  width: 130,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: NetImage(others[i].imageUrl, width: 130, height: 120, fallbackEmoji: others[i].emoji),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(others[i].name,
+                        maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text('${others[i].caloriesPerServing} kcal', style: TextStyle(fontSize: 12, color: c.textMuted)),
+                  ]),
+                ),
+              ),
             ),
           ),
+        ),
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ]),
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: ElevatedButton(
-            onPressed: _showAddToMeal,
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size.fromHeight(50),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-            ),
-            child: const Text('Add to Meal',
-                style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white)),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+          child: FilledButton.icon(
+            onPressed: _log,
+            icon: const Icon(Icons.add_task_rounded),
+            label: Text('Log $_servings serving${_servings == 1 ? '' : 's'} · ${r.caloriesPerServing * _servings} kcal'),
           ),
         ),
       ),
@@ -242,397 +231,92 @@ class _RecipeScreenState extends State<RecipeScreen>
   }
 }
 
-// ── Recipe hero image ─────────────────────────────────────────────────────────
-class _RecipeHero extends StatelessWidget {
-  final Recipe recipe;
-  const _RecipeHero({required this.recipe});
-
-  @override
-  Widget build(BuildContext context) {
-    if (recipe.imageUrl != null) {
-      return CachedNetworkImage(
-        imageUrl: recipe.imageUrl!,
-        fit: BoxFit.cover,
-        placeholder: (_, __) =>
-            Container(color: recipe.color,
-                child: Center(
-                    child: Text(recipe.emoji,
-                        style: const TextStyle(fontSize: 80)))),
-        errorWidget: (_, __, ___) =>
-            Container(color: recipe.color,
-                child: Center(
-                    child: Text(recipe.emoji,
-                        style: const TextStyle(fontSize: 80)))),
-      );
-    }
-    return Container(
-      color: recipe.color,
-      child: Center(
-          child: Text(recipe.emoji,
-              style: const TextStyle(fontSize: 80))),
-    );
-  }
-}
-
-// ── Circle icon button ────────────────────────────────────────────────────────
-class _CircleIconBtn extends StatelessWidget {
+class _CircleButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final Color? color;
-  const _CircleIconBtn(
-      {required this.icon, required this.onTap, this.color});
+  const _CircleButton({required this.icon, required this.onTap, this.color});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 36, height: 36,
-          decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.9),
-              shape: BoxShape.circle),
-          child: Icon(icon,
-              size: 20, color: color ?? kDark),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.all(6),
+        child: Material(
+          color: context.colors.surface.withValues(alpha: 0.92),
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: onTap,
+            child: Padding(padding: const EdgeInsets.all(8), child: Icon(icon, color: color ?? context.colors.text, size: 22)),
+          ),
         ),
       );
 }
 
-// ── Recipe tab ────────────────────────────────────────────────────────────────
-class _RecipeTab extends StatelessWidget {
+class _Stat extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color color;
+  const _Stat(this.value, this.label, this.color);
+
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: Container(
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
+          child: Column(children: [
+            Text(value, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+            Text(label, style: TextStyle(fontSize: 11, color: context.colors.textMuted)),
+          ]),
+        ),
+      );
+}
+
+class _NutritionLabel extends StatelessWidget {
   final Recipe recipe;
   final int servings;
-  final int totalCals;
-  final ValueChanged<int> onServingsChanged;
-  final List<Recipe> otherRecipes;
-  final ValueChanged<Recipe> onRecipeTap;
-
-  const _RecipeTab({
-    required this.recipe,
-    required this.servings,
-    required this.totalCals,
-    required this.onServingsChanged,
-    required this.otherRecipes,
-    required this.onRecipeTap,
-  });
+  const _NutritionLabel({required this.recipe, required this.servings});
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        // Serving size
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-              color: kBg, borderRadius: BorderRadius.circular(12)),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Serving Size',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: kDark)),
-                Text('$totalCals cals total',
-                    style: const TextStyle(color: kGrey, fontSize: 12)),
-              ]),
-              Row(children: [
-                _CounterBtn(
-                    icon: Icons.remove,
-                    onTap: () {
-                      if (servings > 1) onServingsChanged(servings - 1);
-                    }),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text('$servings',
-                      style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: kDark)),
-                ),
-                _CounterBtn(
-                    icon: Icons.add,
-                    onTap: () => onServingsChanged(servings + 1)),
-              ]),
-            ],
-          ),
+    final c = context.colors;
+    String unit(String k) => (k == 'Sodium' || k == 'Cholesterol' || k == 'Potassium') ? 'mg' : 'g';
+    return AppCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Nutrition Facts', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+        Text('$servings serving${servings == 1 ? '' : 's'}', style: TextStyle(color: c.textMuted)),
+        Divider(thickness: 6, color: c.text, height: 20),
+        Row(children: [
+          const Text('Calories', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          const Spacer(),
+          Text('${recipe.caloriesPerServing * servings}',
+              style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+        ]),
+        Divider(thickness: 3, color: c.text, height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text('% Daily Value*', style: TextStyle(fontSize: 12, color: c.textMuted, fontWeight: FontWeight.w700)),
         ),
-
-        const SizedBox(height: 20),
-
-        // Ingredients
-        const Text('Ingredients',
-            style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w700, color: kDark)),
-        const SizedBox(height: 10),
-        ...recipe.ingredients.map((ing) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 7, height: 7,
-                    margin: const EdgeInsets.only(top: 6, right: 10),
-                    decoration: BoxDecoration(
-                        color: recipe.color, shape: BoxShape.circle),
-                  ),
-                  Expanded(
-                      child: Text(ing,
-                          style: const TextStyle(
-                              fontSize: 14, color: kDark, height: 1.4))),
-                ],
-              ),
-            )),
-
-        const SizedBox(height: 20),
-
-        // Directions
-        const Text('Directions',
-            style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w700, color: kDark)),
-        const SizedBox(height: 10),
-        ...recipe.directions.asMap().entries.map((e) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 26, height: 26,
-                    margin: const EdgeInsets.only(right: 12),
-                    decoration: BoxDecoration(
-                        color: recipe.color, shape: BoxShape.circle),
-                    child: Center(
-                        child: Text('${e.key + 1}',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700))),
-                  ),
-                  Expanded(
-                      child: Text(e.value,
-                          style: const TextStyle(
-                              fontSize: 14, color: kDark, height: 1.5))),
-                ],
-              ),
-            )),
-
-        const SizedBox(height: 20),
-
-        // Other Recipes
-        const Text('Other Recipes',
-            style: TextStyle(
-                fontSize: 16, fontWeight: FontWeight.w700, color: kDark)),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 130,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: otherRecipes.length,
-            itemBuilder: (_, i) => RecipeCard(
-              recipe: otherRecipes[i],
-              onTap: () => onRecipeTap(otherRecipes[i]),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: 16),
-
-        // Find alternatives
-        OutlinedButton(
-          onPressed: () {},
-          style: OutlinedButton.styleFrom(
-            side: const BorderSide(color: kPrimary),
-            minimumSize: const Size.fromHeight(46),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-          ),
-          child: const Text('Find other alternatives',
-              style: TextStyle(
-                  color: kPrimary, fontWeight: FontWeight.w600)),
-        ),
-
-        const SizedBox(height: 80),
-      ],
-    );
-  }
-}
-
-// ── Nutrition tab ─────────────────────────────────────────────────────────────
-class _NutritionTab extends StatelessWidget {
-  final Recipe recipe;
-  const _NutritionTab({required this.recipe});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            border: Border.all(color: kDark, width: 2),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Nutrition Facts',
+        for (final e in recipe.nutritionFacts.entries) ...[
+          Divider(color: c.border),
+          Row(children: [
+            Padding(
+              padding: EdgeInsets.only(left: e.key == 'Saturated Fat' || e.key == 'Dietary Fiber' || e.key == 'Sugars' ? 16 : 0),
+              child: Text(e.key,
                   style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                      color: kDark)),
-              const Divider(color: kDark, thickness: 2),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Amount',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: kDark)),
-                  const Text('Per Serving',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: kDark)),
-                ],
-              ),
-              const Divider(color: kDark, thickness: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Calories',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                          color: kDark)),
-                  Text('${recipe.caloriesPerServing}',
-                      style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          color: kDark)),
-                ],
-              ),
-              const Divider(color: kDark, thickness: 4),
-              const Align(
-                alignment: Alignment.centerRight,
-                child: Text('% Daily Value*',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
-                        color: kDark)),
-              ),
-              ...recipe.nutritionFacts.entries
-                  .map((e) => _NutrRow(label: e.key, fact: e.value)),
-              const Divider(color: kDark),
-              const Text(
-                '* The % Daily Value (DV) tells you how much a nutrient in a serving contributes to a daily diet. 2000 calories a day is used for general nutrition advice.',
-                style: TextStyle(fontSize: 11, color: kGrey),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 80),
-      ],
-    );
-  }
-}
-
-class _NutrRow extends StatelessWidget {
-  final String label;
-  final NutritionFact fact;
-  const _NutrRow({required this.label, required this.fact});
-
-  @override
-  Widget build(BuildContext context) => Column(children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: kDark)),
-              Text(
-                  '${fact.amount.toStringAsFixed(0)}g  '
-                  '${fact.dv.toStringAsFixed(0)}%',
-                  style: const TextStyle(fontSize: 13, color: kDark)),
-            ],
-          ),
-        ),
-        const Divider(height: 1, color: Color(0xFFDDDDDD)),
-      ]);
-}
-
-// ── Add to Meal sheet ─────────────────────────────────────────────────────────
-class _AddToMealSheet extends StatelessWidget {
-  final ValueChanged<String> onAdd;
-  const _AddToMealSheet({required this.onAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    const mealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snacks'];
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('Add to Meal',
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: kDark)),
-          const SizedBox(height: 16),
-          ...mealTypes.map((mt) => ListTile(
-                leading: Text(mealTypeEmoji(mt),
-                    style: const TextStyle(fontSize: 22)),
-                title: Text(mt,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w600, color: kDark)),
-                contentPadding: EdgeInsets.zero,
-                onTap: () => onAdd(mt),
-              )),
+                      fontWeight: e.key.startsWith('Total') || e.key == 'Protein' ? FontWeight.w800 : FontWeight.w500)),
+            ),
+            const SizedBox(width: 6),
+            Text('${(e.value.amount * servings).toStringAsFixed(e.value.amount * servings < 10 ? 1 : 0)}${unit(e.key)}',
+                style: TextStyle(color: c.textMuted)),
+            const Spacer(),
+            Text('${(e.value.dv * servings).round()}%', style: const TextStyle(fontWeight: FontWeight.w800)),
+          ]),
         ],
-      ),
+        const SizedBox(height: 10),
+        Text('*Percent Daily Values are based on a 2,000 calorie diet.',
+            style: TextStyle(fontSize: 11, color: c.textMuted)),
+      ]),
     );
   }
-}
-
-// ── Counter button ────────────────────────────────────────────────────────────
-class _CounterBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _CounterBtn({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 32, height: 32,
-          decoration: BoxDecoration(
-              color: kBg, borderRadius: BorderRadius.circular(8)),
-          child: Icon(icon, size: 18, color: kDark),
-        ),
-      );
-}
-
-// ── Tab delegate ──────────────────────────────────────────────────────────────
-class _TabDelegate extends SliverPersistentHeaderDelegate {
-  final TabBar tabBar;
-  const _TabDelegate(this.tabBar);
-
-  @override
-  double get minExtent => tabBar.preferredSize.height;
-  @override
-  double get maxExtent => tabBar.preferredSize.height;
-
-  @override
-  Widget build(_, __, ___) =>
-      Container(color: Colors.white, child: tabBar);
-
-  @override
-  bool shouldRebuild(_) => false;
 }
